@@ -41,17 +41,61 @@ import org.springframework.web.client.RestTemplate;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
+import com.amazonaws.services.secretsmanager.AWSSecretsManager;
+import com.amazonaws.services.secretsmanager.AWSSecretsManagerClientBuilder;
+import com.amazonaws.services.secretsmanager.model.GetSecretValueRequest;
+import com.amazonaws.services.secretsmanager.model.GetSecretValueResult;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class LambdaDemo implements RequestHandler<Map<String,String>, String> {
 		
 	public String handleRequest(Map<String,String> map, Context context) {
 		// TODO Auto-generated method stub
 		LambdaLogger log=context.getLogger();
+		String db_username="";
+		String db_password="";
+		String email_password="";
+		String secret="";
+		String secretname="vaccine-slot-notifier-secrets";
+		String region="ap-south-1";
+		GetSecretValueRequest getSecretValueRequest=new GetSecretValueRequest().withSecretId(secretname);
+		GetSecretValueResult getSecretValueResult=null;
+		AWSSecretsManager awsSecretsManager=AWSSecretsManagerClientBuilder.standard().withRegion(region).build();
+		getSecretValueResult=awsSecretsManager.getSecretValue(getSecretValueRequest);
+		if(getSecretValueResult.getSecretString()!=null) {
+			secret=getSecretValueResult.getSecretString();
+		}
+		ObjectMapper mapper=new ObjectMapper();
+		Map<String,String> secretsMap=new HashMap();
+		try {
+			secretsMap=mapper.readValue(secret, new TypeReference<HashMap<String,String>>(){});
+		} catch (JsonParseException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		} catch (JsonMappingException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		if(secretsMap.size()>0) {
+			db_username=secretsMap.get("db_username");
+			db_password=secretsMap.get("db_password");
+			email_password=secretsMap.get("email_password");
+		}
+		else {
+			log.log("Unable to fetch secrets from secretsmanager");
+			return "completed";
+		}
 		JavaMailSenderImpl javaMailSender=new JavaMailSenderImpl();
 		javaMailSender.setHost("smtp.gmail.com");
 		javaMailSender.setPort(587);
 		javaMailSender.setUsername("vaccineslotfinder@gmail.com");
-		javaMailSender.setPassword("xdfoiaxgyadeqzkswzotre");
+		javaMailSender.setPassword(email_password);
 		CloseableHttpClient httpClient=HttpClients.custom().setSSLHostnameVerifier(new NoopHostnameVerifier()).build();
 		HttpComponentsClientHttpRequestFactory clientHttpRequestFactory=new HttpComponentsClientHttpRequestFactory();
 		clientHttpRequestFactory.setHttpClient(httpClient);
@@ -61,13 +105,11 @@ public class LambdaDemo implements RequestHandler<Map<String,String>, String> {
 		headers.add(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
 		HttpEntity entity=new HttpEntity("parameters",headers);
 		String url="jdbc:mysql://database-1.cndvibuxd7nm.ap-south-1.rds.amazonaws.com:3306/db";
-		String user="admin";
-		String password="db123456";
 		String pincode="";
 		String email="";
 		Map<String,List<String>> pincodeEmailMap=new HashMap<String,List<String>>();
 		try {
-			Connection connection=DriverManager.getConnection(url, user, password);
+			Connection connection=DriverManager.getConnection(url, db_username, db_password);
 			Statement stmt=connection.createStatement();
 			ResultSet rs=stmt.executeQuery("select * from vaccineslots where notifyflag='Y'");
 			log.log("Fetched details from db");
